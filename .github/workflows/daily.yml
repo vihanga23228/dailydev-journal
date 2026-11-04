@@ -1,0 +1,73 @@
+name: DailyDev Journal
+
+on:
+  schedule:
+    # 00:05 Asia/Colombo (UTC+05:30). Scheduled runs can be delayed.
+    - cron: '35 18 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'site/data/quotes.json'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: dailydev-pages
+  cancel-in-progress: false
+
+jobs:
+  update-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Update journal (scheduled or manual only)
+        if: github.event_name != 'push'
+        run: python update.py
+
+      - name: Commit journal update
+        if: github.event_name != 'push'
+        env:
+          COMMIT_NAME: ${{ vars.COMMIT_NAME }}
+          COMMIT_EMAIL: ${{ vars.COMMIT_EMAIL }}
+        run: |
+          if [ -z "$COMMIT_NAME" ] || [ -z "$COMMIT_EMAIL" ]; then
+            echo 'Set repository variables COMMIT_NAME and COMMIT_EMAIL.' >&2
+            exit 1
+          fi
+          git config user.name "$COMMIT_NAME"
+          git config user.email "$COMMIT_EMAIL"
+          git add site/data/quotes.json
+          if ! git diff --cached --quiet; then
+            git commit -m "data: add daily journal entry"
+            git push
+          else
+            echo 'No new entry; skipping commit.'
+          fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: ./site
+
+      - name: Deploy to Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
